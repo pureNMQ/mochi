@@ -15,8 +15,9 @@ namespace Mochi.FSM
             get => stateMachine;
             set => stateMachine = value;
         }
-        //TODO 接口未实现
-        IStateMachine IState.Machine { get => Machine; set => throw new System.NotImplementedException(); }
+
+        // 非 StateMachine 实现属于误用：转换失败立即暴露，静默 null 会让后续 Tick 行为不可解释
+        IStateMachine IState.Machine { get => Machine; set => Machine = (StateMachine)value; }
 
         public State()
         {
@@ -27,6 +28,10 @@ namespace Mochi.FSM
         {
             this.stateMachine = stateMachine;
         }
+
+        public virtual bool CanEnter() => true;
+
+        public virtual bool CanExit() => true;
 
         public void Enter()
         {

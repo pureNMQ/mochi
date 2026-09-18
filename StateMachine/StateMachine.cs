@@ -8,8 +8,11 @@ namespace Mochi.FSM
         protected Dictionary<TypeAndName, IState> states = new();
         private IState currentState;
         private bool isStarted = false;
-        private TypeAndName startState;
+
         public IState CurrentState => currentState;
+
+        /// <summary>新状态进入完成后广播 (previous, current)；起始与停止的边界侧为 null。</summary>
+        public event Action<IState, IState> StateChanged;
 
         public void Start<T>(string name = "") where T : IState
         {
@@ -21,9 +24,12 @@ namespace Mochi.FSM
         {
             if (isStarted) return;
             if (!states.ContainsKey(key)) return;
+            if (!states[key].CanEnter()) return;
+
             currentState = states[key];
             isStarted = true;
             currentState?.Enter();
+            StateChanged?.Invoke(null, currentState);
         }
 
         public void Tick(float deltaTime)
@@ -36,8 +42,11 @@ namespace Mochi.FSM
         {
             if (!isStarted) return;
 
+            IState previous = currentState;
             currentState?.Exit();
+            currentState = null;
             isStarted = false;
+            StateChanged?.Invoke(previous, null);
         }
 
         public void Dispose()
@@ -61,15 +70,19 @@ namespace Mochi.FSM
             return GetState(new TypeAndName(typeof(T), name));
         }
 
+        /// <summary>守卫拒绝、键未知或未启动时保持原状态，不抛异常。</summary>
         public void ChangeState(TypeAndName typeAndName)
         {
-            if (!states.ContainsKey(typeAndName))
-            {
-                return;
-            }
-            currentState?.Exit();
+            if (!isStarted) return;
+            if (!states.ContainsKey(typeAndName)) return;
+            if (currentState != null && !currentState.CanExit()) return;
+            if (!states[typeAndName].CanEnter()) return;
+
+            IState previous = currentState;
+            previous?.Exit();
             currentState = states[typeAndName];
             currentState?.Enter();
+            StateChanged?.Invoke(previous, currentState);
         }
 
         public void ChangeState<T>(string name = "") where T : IState
