@@ -9,6 +9,10 @@ namespace Mochi.DataTable
     /// </summary>
     public sealed class TableDefinition<TKey, TValue>
     {
+        private readonly List<TableReference> references = new List<TableReference>();
+        private readonly List<ITableEditRule<TKey, TValue>> editRules =
+            new List<ITableEditRule<TKey, TValue>>();
+
         /// <summary>表名,即 DataTableManager 中的注册名。</summary>
         public string TableName { get; }
 
@@ -20,6 +24,12 @@ namespace Mochi.DataTable
 
         /// <summary>除键字段外的必填字段名。</summary>
         public IReadOnlyList<string> RequiredFields { get; }
+
+        /// <summary>跨表引用声明;仅编辑期校验消费,装载管线不校验引用。</summary>
+        public IReadOnlyList<TableReference> References => references;
+
+        /// <summary>领域自定义编辑期规则;仅编辑期执行,装载时不执行。</summary>
+        public IReadOnlyList<ITableEditRule<TKey, TValue>> EditRules => editRules;
 
         /// <summary>
         /// 声明一张表。
@@ -64,6 +74,33 @@ namespace Mochi.DataTable
             KeyFieldName = keyFieldName;
             KeySelector = keySelector;
             RequiredFields = requiredFields;
+        }
+
+        /// <summary>
+        /// 声明一个跨表引用并返回自身,供链式构造。
+        /// </summary>
+        /// <param name="fieldName">存放引用键的字段名。</param>
+        /// <param name="targetTableName">被引用表的表名。</param>
+        /// <exception cref="ArgumentException">fieldName 或 targetTableName 为 null 或空。</exception>
+        public TableDefinition<TKey, TValue> AddReference(string fieldName, string targetTableName)
+        {
+            references.Add(new TableReference(fieldName, targetTableName));
+            return this;
+        }
+
+        /// <summary>
+        /// 挂入一条领域编辑期规则并返回自身,供链式构造。
+        /// </summary>
+        /// <param name="rule">领域规则。</param>
+        /// <exception cref="ArgumentNullException">rule 为 null。</exception>
+        public TableDefinition<TKey, TValue> AddRule(ITableEditRule<TKey, TValue> rule)
+        {
+            if (rule == null)
+            {
+                throw new ArgumentNullException(nameof(rule));
+            }
+            editRules.Add(rule);
+            return this;
         }
     }
 }
