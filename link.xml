@@ -1,0 +1,5 @@
+<linker>
+    <!-- Mochi 进热更域后,本程序集对 Newtonsoft 的引用对 IL2CPP linker 不可见;
+         Newtonsoft 包自带的 link.xml 只保留 System 转换器,不保留 Newtonsoft 本体。 -->
+    <assembly fullname="Newtonsoft.Json" preserve="all"/>
+</linker>

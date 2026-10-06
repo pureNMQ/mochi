@@ -4,5 +4,8 @@
   "displayName": "Mochi Core",
   "description": "Mochi pure C# framework. Engine-agnostic: Base, DataTable, EventSystem, Logging, StateMachine, Util.",
   "unity": "2022.3",
-  "type": "library"
+  "type": "library",
+  "dependencies": {
+    "com.unity.nuget.newtonsoft-json": "3.2.2"
+  }
 }
