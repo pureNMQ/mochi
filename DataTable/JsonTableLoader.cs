@@ -8,28 +8,28 @@ namespace Mochi.DataTable
     /// <summary>
     /// JSON 装载管线:文本、表头识别、反序列化、表内结构校验、注册五个步骤的单一入口。
     /// 只接收文本与文件名字符串,不做任何 I/O,资源获取由调用方完成;文件名仅作为错误定位标签使用。
-    /// 表名与行类型按文件自身的 <see cref="TableHeader"/> 识别:注册名取表头 table,
-    /// 表头 rowType 必须与装载泛型行类型的完整类名一致,否则装载失败。
+    /// 表头与代码注册表交叉配对:表头 table 须与 <see cref="TableDefinition{TRow}.TableName"/> 一致,
+    /// 表头 rowType 须与装载泛型行类型的完整类名一致,任一不符即装载失败,因为文件与代码指向同一张表是注册成立的前提。
+    /// 行反序列化启用演化容错:字段缺失、类型不匹配或字段改名取默认值或旧名回退,装载不因单字段失败;
+    /// 结构校验(顶层形状、行对象、id 非空唯一)不归容错兜底,仍整体拒绝。
     /// 单表内收集全部错误后整体拒绝;数据非法时返回失败结果,不抛异常、不注册。
     /// 表名已被注册时沿用 RegisterDataTable 的抛错语义(fail loud),因为重复装载属于调用顺序错误,不是数据错误。
     /// </summary>
     public static class JsonTableLoader
     {
-        /// <summary>行反序列化器;DataRef 字段按纯字符串 id 读写,装载期不做字段级演化容错(归后续装载策略)。</summary>
+        /// <summary>行反序列化器;字段级容错语义见 <see cref="TableJsonSerialization.CreateEvolutionSettings"/>。</summary>
         private static readonly JsonSerializer RowSerializer = CreateRowSerializer();
 
         private static JsonSerializer CreateRowSerializer()
         {
-            var serializer = new JsonSerializer();
-            serializer.Converters.Add(new DataRefJsonConverter());
-            return serializer;
+            return JsonSerializer.Create(TableJsonSerialization.CreateEvolutionSettings());
         }
 
         /// <summary>
-        /// 装载一张表:解析顶层对象与表头、按表头识别表名与行类型、逐条校验表内结构,
-        /// 全部通过时构造封口表并以表头 table 为名注册。
+        /// 装载一张表:解析顶层对象与表头、将表名与行类型与代码注册表交叉配对、逐条校验表内结构,
+        /// 全部通过时构造封口表并以表头 table 为名注册;行字段反序列化启用演化容错。
         /// </summary>
-        /// <param name="definition">表声明;其必填字段声明仍参与表内校验,表名交叉配对不在此处。</param>
+        /// <param name="definition">代码注册表声明;TableName 参与表头交叉配对,必填字段声明只属于编辑期校验,装载不消费。</param>
         /// <param name="fileName">文件名,仅用于错误定位。</param>
         /// <param name="json">表文件的 JSON 文本,顶层必须是 {"$table":{...},"rows":[...]} 表对象。</param>
         /// <exception cref="ArgumentNullException">definition 或 json 为 null。</exception>
@@ -80,6 +80,14 @@ namespace Mochi.DataTable
                 return new TableLoadResult<TRow>(false, errors, null);
             }
 
+            if (header.Table != definition.TableName)
+            {
+                errors.Add(new TableLoadError(
+                    fileName, null, null,
+                    "表头表名 " + header.Table + " 与代码注册表声明的 " + definition.TableName + " 不符。"));
+                return new TableLoadResult<TRow>(false, errors, null);
+            }
+
             if (header.RowType != typeof(TRow).FullName)
             {
                 errors.Add(new TableLoadError(
@@ -104,7 +112,7 @@ namespace Mochi.DataTable
             foreach (JToken entry in rowsToken)
             {
                 ordinal++;
-                LoadEntry(definition, fileName, entry, ordinal, rows, keyOrdinals, errors);
+                LoadEntry(fileName, entry, ordinal, rows, keyOrdinals, errors);
             }
 
             if (errors.Count > 0)
@@ -118,7 +126,6 @@ namespace Mochi.DataTable
         }
 
         private static void LoadEntry<TRow>(
-            TableDefinition<TRow> definition,
             string fileName,
             JToken entry,
             int ordinal,
@@ -144,15 +151,6 @@ namespace Mochi.DataTable
                     fileName, entryId, keyFieldName,
                     $"第 {ordinal} 个条目缺少键字段 {keyFieldName}。"));
             }
-            foreach (string field in definition.RequiredFields)
-            {
-                if (!IsFieldPresent(entryObject, field))
-                {
-                    errors.Add(new TableLoadError(
-                        fileName, entryId, field,
-                        $"条目 {entryId ?? ("第 " + ordinal + " 个")} 缺少必填字段 {field}。"));
-                }
-            }
 
             TRow row;
             try
@@ -161,6 +159,7 @@ namespace Mochi.DataTable
             }
             catch (JsonException ex)
             {
+                //演化容错已在设置内吞掉成员级错误,能到这里的是它不覆盖的结构级异常
                 errors.Add(new TableLoadError(
                     fileName, entryId, null, $"第 {ordinal} 个条目反序列化失败: {ex.Message}"));
                 return;
