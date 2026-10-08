@@ -6,20 +6,32 @@ using Newtonsoft.Json.Linq;
 namespace Mochi.DataTable
 {
     /// <summary>
-    /// JSON 装载管线:文本、反序列化、表内结构校验、注册四个步骤的单一入口。
+    /// JSON 装载管线:文本、表头识别、反序列化、表内结构校验、注册五个步骤的单一入口。
     /// 只接收文本与文件名字符串,不做任何 I/O,资源获取由调用方完成;文件名仅作为错误定位标签使用。
+    /// 表名与行类型按文件自身的 <see cref="TableHeader"/> 识别:注册名取表头 table,
+    /// 表头 rowType 必须与装载泛型行类型的完整类名一致,否则装载失败。
     /// 单表内收集全部错误后整体拒绝;数据非法时返回失败结果,不抛异常、不注册。
     /// 表名已被注册时沿用 RegisterDataTable 的抛错语义(fail loud),因为重复装载属于调用顺序错误,不是数据错误。
     /// </summary>
     public static class JsonTableLoader
     {
+        /// <summary>行反序列化器;DataRef 字段按纯字符串 id 读写,装载期不做字段级演化容错(归后续装载策略)。</summary>
+        private static readonly JsonSerializer RowSerializer = CreateRowSerializer();
+
+        private static JsonSerializer CreateRowSerializer()
+        {
+            var serializer = new JsonSerializer();
+            serializer.Converters.Add(new DataRefJsonConverter());
+            return serializer;
+        }
+
         /// <summary>
-        /// 装载一张表:解析为行数组、逐条校验表内结构,全部通过时构造封口表并注册。
-        /// 行键取每行的 <see cref="TableRow.id"/>。
+        /// 装载一张表:解析顶层对象与表头、按表头识别表名与行类型、逐条校验表内结构,
+        /// 全部通过时构造封口表并以表头 table 为名注册。
         /// </summary>
-        /// <param name="definition">表声明。</param>
+        /// <param name="definition">表声明;其必填字段声明仍参与表内校验,表名交叉配对不在此处。</param>
         /// <param name="fileName">文件名,仅用于错误定位。</param>
-        /// <param name="json">表文件的 JSON 文本,顶层必须是行对象数组。</param>
+        /// <param name="json">表文件的 JSON 文本,顶层必须是 {"$table":{...},"rows":[...]} 表对象。</param>
         /// <exception cref="ArgumentNullException">definition 或 json 为 null。</exception>
         /// <exception cref="ArgumentException">fileName 为 null 或空。</exception>
         /// <exception cref="InvalidOperationException">数据合法但表名已被注册,由 RegisterDataTable 抛出。</exception>
@@ -54,17 +66,42 @@ namespace Mochi.DataTable
                 return new TableLoadResult<TRow>(false, errors, null);
             }
 
-            if (root.Type != JTokenType.Array)
+            if (root.Type != JTokenType.Object)
             {
                 errors.Add(new TableLoadError(
-                    fileName, null, null, "顶层不是行对象数组,实际类型为 " + root.Type + "。"));
+                    fileName, null, null,
+                    "顶层不是表对象,实际类型为 " + root.Type + ",缺少 " + TableHeader.FieldName + " 表头。"));
+                return new TableLoadResult<TRow>(false, errors, null);
+            }
+
+            if (!TableHeader.TryParse((JObject)root, out TableHeader header, out string headerError))
+            {
+                errors.Add(new TableLoadError(fileName, null, null, headerError));
+                return new TableLoadResult<TRow>(false, errors, null);
+            }
+
+            if (header.RowType != typeof(TRow).FullName)
+            {
+                errors.Add(new TableLoadError(
+                    fileName, null, null,
+                    "表头行类型 " + header.RowType + " 与装载行类型 " + typeof(TRow).FullName + " 不符。"));
+                return new TableLoadResult<TRow>(false, errors, null);
+            }
+
+            JToken rowsToken = root[TableHeader.RowsFieldName];
+            if (rowsToken == null || rowsToken.Type != JTokenType.Array)
+            {
+                errors.Add(new TableLoadError(
+                    fileName, null, null,
+                    "缺少 " + TableHeader.RowsFieldName + " 行数组,实际类型为 " +
+                    (rowsToken == null ? "缺失" : rowsToken.Type.ToString()) + "。"));
                 return new TableLoadResult<TRow>(false, errors, null);
             }
 
             var rows = new List<TRow>();
             var keyOrdinals = new Dictionary<string, int>();
             int ordinal = 0;
-            foreach (JToken entry in root)
+            foreach (JToken entry in rowsToken)
             {
                 ordinal++;
                 LoadEntry(definition, fileName, entry, ordinal, rows, keyOrdinals, errors);
@@ -76,7 +113,7 @@ namespace Mochi.DataTable
             }
 
             ValidatedTable<TRow> table = ValidatedTable<TRow>.BuildFromRows(rows);
-            DataTableManager.Instance.RegisterDataTable(definition.TableName, table);
+            DataTableManager.Instance.RegisterDataTable(header.Table, table);
             return new TableLoadResult<TRow>(true, errors, table);
         }
 
@@ -120,7 +157,7 @@ namespace Mochi.DataTable
             TRow row;
             try
             {
-                row = entry.ToObject<TRow>();
+                row = entry.ToObject<TRow>(RowSerializer);
             }
             catch (JsonException ex)
             {

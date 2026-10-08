@@ -1,6 +1,6 @@
 {
   "name": "com.mochi.core",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "displayName": "Mochi Core",
   "description": "Mochi pure C# framework. Engine-agnostic: Base, DataTable, EventSystem, Logging, StateMachine, Util.",
   "unity": "2022.3",
