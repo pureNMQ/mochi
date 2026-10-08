@@ -4,23 +4,17 @@ using System.Collections.Generic;
 namespace Mochi.DataTable
 {
     /// <summary>
-    /// 表声明:装载一张表所需的全部元数据。
-    /// 键字段名供错误定位与键存在性检查使用;必填字段列表不包含键字段,键字段始终必填。
+    /// 表声明:装载一张表所需的全部元数据。行键恒为 <see cref="TableRow.id"/>,不再单独声明键维度。
+    /// 必填字段列表不含键字段,键字段始终必填。
     /// </summary>
-    public sealed class TableDefinition<TKey, TValue>
+    public sealed class TableDefinition<TRow> where TRow : TableRow
     {
         private readonly List<TableReference> references = new List<TableReference>();
-        private readonly List<ITableEditRule<TKey, TValue>> editRules =
-            new List<ITableEditRule<TKey, TValue>>();
+        private readonly List<ITableEditRule<TRow>> editRules =
+            new List<ITableEditRule<TRow>>();
 
         /// <summary>表名,即 DataTableManager 中的注册名。</summary>
         public string TableName { get; }
-
-        /// <summary>键字段名,即 KeySelector 读取的字段在 JSON 中的名字。</summary>
-        public string KeyFieldName { get; }
-
-        /// <summary>从行提取表键的函数,例如 row => row.id。</summary>
-        public Func<TValue, TKey> KeySelector { get; }
 
         /// <summary>除键字段外的必填字段名。</summary>
         public IReadOnlyList<string> RequiredFields { get; }
@@ -29,34 +23,21 @@ namespace Mochi.DataTable
         public IReadOnlyList<TableReference> References => references;
 
         /// <summary>领域自定义编辑期规则;仅编辑期执行,装载时不执行。</summary>
-        public IReadOnlyList<ITableEditRule<TKey, TValue>> EditRules => editRules;
+        public IReadOnlyList<ITableEditRule<TRow>> EditRules => editRules;
 
         /// <summary>
         /// 声明一张表。
         /// </summary>
         /// <param name="tableName">表名,用作注册名。</param>
-        /// <param name="keyFieldName">键字段名。</param>
-        /// <param name="keySelector">从行提取表键的函数。</param>
         /// <param name="requiredFields">除键字段外的必填字段名。</param>
-        /// <exception cref="ArgumentException">tableName 或 keyFieldName 为 null 或空,或 requiredFields 含空项。</exception>
-        /// <exception cref="ArgumentNullException">keySelector 为 null。</exception>
+        /// <exception cref="ArgumentException">tableName 为 null 或空,或 requiredFields 含空项。</exception>
         public TableDefinition(
             string tableName,
-            string keyFieldName,
-            Func<TValue, TKey> keySelector,
             params string[] requiredFields)
         {
             if (string.IsNullOrEmpty(tableName))
             {
                 throw new ArgumentException("表名不能为空。", nameof(tableName));
-            }
-            if (string.IsNullOrEmpty(keyFieldName))
-            {
-                throw new ArgumentException("键字段名不能为空。", nameof(keyFieldName));
-            }
-            if (keySelector == null)
-            {
-                throw new ArgumentNullException(nameof(keySelector));
             }
             if (requiredFields == null)
             {
@@ -71,8 +52,6 @@ namespace Mochi.DataTable
             }
 
             TableName = tableName;
-            KeyFieldName = keyFieldName;
-            KeySelector = keySelector;
             RequiredFields = requiredFields;
         }
 
@@ -82,7 +61,7 @@ namespace Mochi.DataTable
         /// <param name="fieldName">存放引用键的字段名。</param>
         /// <param name="targetTableName">被引用表的表名。</param>
         /// <exception cref="ArgumentException">fieldName 或 targetTableName 为 null 或空。</exception>
-        public TableDefinition<TKey, TValue> AddReference(string fieldName, string targetTableName)
+        public TableDefinition<TRow> AddReference(string fieldName, string targetTableName)
         {
             references.Add(new TableReference(fieldName, targetTableName));
             return this;
@@ -93,7 +72,7 @@ namespace Mochi.DataTable
         /// </summary>
         /// <param name="rule">领域规则。</param>
         /// <exception cref="ArgumentNullException">rule 为 null。</exception>
-        public TableDefinition<TKey, TValue> AddRule(ITableEditRule<TKey, TValue> rule)
+        public TableDefinition<TRow> AddRule(ITableEditRule<TRow> rule)
         {
             if (rule == null)
             {

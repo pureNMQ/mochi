@@ -13,16 +13,17 @@ namespace Mochi.DataTable
     public static class TableEditValidator
     {
         /// <summary>
-        /// 校验一张表的全部行数据。
+        /// 校验一张表的全部行数据。行键取每行的 <see cref="TableRow.id"/>。
         /// </summary>
         /// <param name="definition">表声明,其引用与规则挂点参与校验。</param>
         /// <param name="rows">行对象数组;通常来自编辑工具对表文件的解析。</param>
         /// <param name="keyResolver">跨表键解析器;传 null 时跳过引用检查(无跨表上下文的场景)。</param>
         /// <exception cref="ArgumentNullException">definition 或 rows 为 null。</exception>
-        public static IReadOnlyList<TableEditError> ValidateTable<TKey, TValue>(
-            TableDefinition<TKey, TValue> definition,
+        public static IReadOnlyList<TableEditError> ValidateTable<TRow>(
+            TableDefinition<TRow> definition,
             JArray rows,
             IEditTimeKeyResolver keyResolver)
+            where TRow : TableRow
         {
             if (definition == null)
             {
@@ -46,19 +47,20 @@ namespace Mochi.DataTable
                 }
 
                 var entryObject = (JObject)entry;
-                string entryId = ReadTokenString(entryObject[definition.KeyFieldName]);
+                string keyFieldName = TableRow.IdFieldName;
+                string entryId = ReadTokenString(entryObject[keyFieldName]);
 
                 if (string.IsNullOrEmpty(entryId))
                 {
                     errors.Add(new TableEditError(
-                        definition.KeyFieldName,
-                        $"第 {ordinal} 个条目缺少键字段 {definition.KeyFieldName} 或其值为空。"));
+                        keyFieldName,
+                        $"第 {ordinal} 个条目缺少键字段 {keyFieldName} 或其值为空。"));
                 }
                 else if (!seenKeys.Add(entryId))
                 {
                     errors.Add(new TableEditError(
-                        definition.KeyFieldName,
-                        $"条目 {entryId} 与其他条目的键 {definition.KeyFieldName} 重复。"));
+                        keyFieldName,
+                        $"条目 {entryId} 与其他条目的键 {keyFieldName} 重复。"));
                 }
 
                 foreach (string field in definition.RequiredFields)
@@ -78,12 +80,13 @@ namespace Mochi.DataTable
             return errors;
         }
 
-        private static void ValidateReferences<TKey, TValue>(
-            TableDefinition<TKey, TValue> definition,
+        private static void ValidateReferences<TRow>(
+            TableDefinition<TRow> definition,
             JObject entry,
             string entryId,
             IEditTimeKeyResolver keyResolver,
             List<TableEditError> errors)
+            where TRow : TableRow
         {
             if (keyResolver == null)
             {
@@ -135,32 +138,33 @@ namespace Mochi.DataTable
             }
         }
 
-        private static void ValidateRules<TKey, TValue>(
-            TableDefinition<TKey, TValue> definition,
+        private static void ValidateRules<TRow>(
+            TableDefinition<TRow> definition,
             JObject entry,
             string entryId,
             IEditTimeKeyResolver keyResolver,
             List<TableEditError> errors)
+            where TRow : TableRow
         {
             if (definition.EditRules.Count == 0)
             {
                 return;
             }
 
-            TValue row;
+            TRow row;
             try
             {
-                row = entry.ToObject<TValue>();
+                row = entry.ToObject<TRow>();
             }
             catch (Exception ex)
             {
                 errors.Add(new TableEditError(
                     null,
-                    $"条目 {entryId} 无法反序列化为 {typeof(TValue).Name},领域规则未执行: {ex.Message}"));
+                    $"条目 {entryId} 无法反序列化为 {typeof(TRow).Name},领域规则未执行: {ex.Message}"));
                 return;
             }
 
-            foreach (ITableEditRule<TKey, TValue> rule in definition.EditRules)
+            foreach (ITableEditRule<TRow> rule in definition.EditRules)
             {
                 IEnumerable<TableEditError> violations;
                 try

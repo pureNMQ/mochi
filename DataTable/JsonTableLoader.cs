@@ -15,6 +15,7 @@ namespace Mochi.DataTable
     {
         /// <summary>
         /// 装载一张表:解析为行数组、逐条校验表内结构,全部通过时构造封口表并注册。
+        /// 行键取每行的 <see cref="TableRow.id"/>。
         /// </summary>
         /// <param name="definition">表声明。</param>
         /// <param name="fileName">文件名,仅用于错误定位。</param>
@@ -22,10 +23,11 @@ namespace Mochi.DataTable
         /// <exception cref="ArgumentNullException">definition 或 json 为 null。</exception>
         /// <exception cref="ArgumentException">fileName 为 null 或空。</exception>
         /// <exception cref="InvalidOperationException">数据合法但表名已被注册,由 RegisterDataTable 抛出。</exception>
-        public static TableLoadResult<TKey, TValue> Load<TKey, TValue>(
-            TableDefinition<TKey, TValue> definition,
+        public static TableLoadResult<TRow> Load<TRow>(
+            TableDefinition<TRow> definition,
             string fileName,
             string json)
+            where TRow : TableRow
         {
             if (definition == null)
             {
@@ -49,18 +51,18 @@ namespace Mochi.DataTable
             catch (JsonException ex)
             {
                 errors.Add(new TableLoadError(fileName, null, null, "JSON 语法错误: " + ex.Message));
-                return new TableLoadResult<TKey, TValue>(false, errors, null);
+                return new TableLoadResult<TRow>(false, errors, null);
             }
 
             if (root.Type != JTokenType.Array)
             {
                 errors.Add(new TableLoadError(
                     fileName, null, null, "顶层不是行对象数组,实际类型为 " + root.Type + "。"));
-                return new TableLoadResult<TKey, TValue>(false, errors, null);
+                return new TableLoadResult<TRow>(false, errors, null);
             }
 
-            var rows = new List<TValue>();
-            var keyOrdinals = new Dictionary<TKey, int>();
+            var rows = new List<TRow>();
+            var keyOrdinals = new Dictionary<string, int>();
             int ordinal = 0;
             foreach (JToken entry in root)
             {
@@ -70,23 +72,23 @@ namespace Mochi.DataTable
 
             if (errors.Count > 0)
             {
-                return new TableLoadResult<TKey, TValue>(false, errors, null);
+                return new TableLoadResult<TRow>(false, errors, null);
             }
 
-            ValidatedTable<TKey, TValue> table =
-                ValidatedTable<TKey, TValue>.BuildFromRows(rows, definition.KeySelector);
+            ValidatedTable<TRow> table = ValidatedTable<TRow>.BuildFromRows(rows);
             DataTableManager.Instance.RegisterDataTable(definition.TableName, table);
-            return new TableLoadResult<TKey, TValue>(true, errors, table);
+            return new TableLoadResult<TRow>(true, errors, table);
         }
 
-        private static void LoadEntry<TKey, TValue>(
-            TableDefinition<TKey, TValue> definition,
+        private static void LoadEntry<TRow>(
+            TableDefinition<TRow> definition,
             string fileName,
             JToken entry,
             int ordinal,
-            List<TValue> rows,
-            Dictionary<TKey, int> keyOrdinals,
+            List<TRow> rows,
+            Dictionary<string, int> keyOrdinals,
             List<TableLoadError> errors)
+            where TRow : TableRow
         {
             if (entry.Type != JTokenType.Object)
             {
@@ -96,13 +98,14 @@ namespace Mochi.DataTable
             }
 
             var entryObject = (JObject)entry;
-            string entryId = ReadEntryId(entryObject, definition.KeyFieldName);
+            string keyFieldName = TableRow.IdFieldName;
+            string entryId = ReadEntryId(entryObject, keyFieldName);
 
-            if (!IsFieldPresent(entryObject, definition.KeyFieldName))
+            if (!IsFieldPresent(entryObject, keyFieldName))
             {
                 errors.Add(new TableLoadError(
-                    fileName, entryId, definition.KeyFieldName,
-                    $"第 {ordinal} 个条目缺少键字段 {definition.KeyFieldName}。"));
+                    fileName, entryId, keyFieldName,
+                    $"第 {ordinal} 个条目缺少键字段 {keyFieldName}。"));
             }
             foreach (string field in definition.RequiredFields)
             {
@@ -114,10 +117,10 @@ namespace Mochi.DataTable
                 }
             }
 
-            TValue row;
+            TRow row;
             try
             {
-                row = entry.ToObject<TValue>();
+                row = entry.ToObject<TRow>();
             }
             catch (JsonException ex)
             {
@@ -126,18 +129,18 @@ namespace Mochi.DataTable
                 return;
             }
 
-            TKey key = definition.KeySelector(row);
-            if (key == null)
+            string key = row.id;
+            if (string.IsNullOrEmpty(key))
             {
                 errors.Add(new TableLoadError(
-                    fileName, null, definition.KeyFieldName,
-                    $"第 {ordinal} 个条目的键字段 {definition.KeyFieldName} 无有效值。"));
+                    fileName, null, keyFieldName,
+                    $"第 {ordinal} 个条目的键字段 {keyFieldName} 无有效值。"));
                 return;
             }
             if (keyOrdinals.TryGetValue(key, out int firstOrdinal))
             {
                 errors.Add(new TableLoadError(
-                    fileName, key.ToString(), definition.KeyFieldName,
+                    fileName, key, keyFieldName,
                     $"第 {ordinal} 个条目与第 {firstOrdinal} 个条目键重复: {key}。"));
                 return;
             }
