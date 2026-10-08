@@ -29,7 +29,7 @@ namespace Mochi.DataTable
         /// 装载一张表:解析顶层对象与表头、将表名与行类型与代码注册表交叉配对、逐条校验表内结构,
         /// 全部通过时构造封口表并以表头 table 为名注册;行字段反序列化启用演化容错。
         /// </summary>
-        /// <param name="definition">代码注册表声明;TableName 参与表头交叉配对,必填字段声明只属于编辑期校验,装载不消费。</param>
+        /// <param name="definition">代码注册表声明;TableName 参与表头交叉配对。</param>
         /// <param name="fileName">文件名,仅用于错误定位。</param>
         /// <param name="json">表文件的 JSON 文本,顶层必须是 {"$table":{...},"rows":[...]} 表对象。</param>
         /// <exception cref="ArgumentNullException">definition 或 json 为 null。</exception>
