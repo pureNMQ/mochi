@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using Mochi.Logging;
@@ -22,8 +23,10 @@ namespace Mochi.Save
         /// <summary>上一版主档的备份文件名。</summary>
         public const string BackupFileName = "Save.json.bak";
 
+        /// <summary>隔离文件名里插在原名之后的标记,便于按名识别迁移链材料。</summary>
+        public const string QuarantineInfix = ".corrupt.";
+
         private const string TempFileSuffix = ".tmp";
-        private const string QuarantineInfix = ".corrupt.";
 
         private readonly ILogger log;
 
@@ -71,10 +74,30 @@ namespace Mochi.Save
                 return null;
             }
 
+            return ReadFile(MainFilePath);
+        }
+
+        /// <summary>
+        /// 读备份档。与 <see cref="Read"/> 同口径:文件不存在、JSON 不可解析或形状非法时记录告警并返回 null,不抛异常。
+        /// 主档与备份的取舍由上层决定(见 <see cref="SaveVersionGuard"/>)。
+        /// </summary>
+        /// <returns>可用的备份档;读不出来时为 null。</returns>
+        public SaveDocument ReadBackup()
+        {
+            if (!BackupExists)
+            {
+                return null;
+            }
+
+            return ReadFile(BackupFilePath);
+        }
+
+        private SaveDocument ReadFile(string filePath)
+        {
             string json;
             try
             {
-                json = File.ReadAllText(MainFilePath, new UTF8Encoding(false));
+                json = File.ReadAllText(filePath, new UTF8Encoding(false));
             }
             catch (Exception exception)
             {
@@ -89,7 +112,7 @@ namespace Mochi.Save
                     SaveJson.CreateSettings());
                 if (document == null)
                 {
-                    log.Warn("存档内容为 JSON null,视为不可读。");
+                    log.WarnFormat("存档内容为 JSON null,视为不可读:{0}", Path.GetFileName(filePath));
                     return null;
                 }
                 return document;
@@ -182,6 +205,33 @@ namespace Mochi.Save
         }
 
         /// <summary>
+        /// 把主档与备份档<strong>成对</strong>改名隔离,两份内容都原样保留。
+        /// 版本不符是主档与 .bak 的共同状态,只挪主档会让下一版代码把那个同样过新的 .bak 当成可用档读回来。
+        /// </summary>
+        /// <returns>实际移动的文件名,主档在前;两份都不存在时为空数组。</returns>
+        public string[] QuarantinePair()
+        {
+            var moved = new List<string>();
+            string stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+
+            if (Exists)
+            {
+                string fileName = MainFileName + QuarantineInfix + stamp;
+                File.Move(MainFilePath, Path.Combine(DirectoryPath, fileName));
+                moved.Add(fileName);
+            }
+
+            if (BackupExists)
+            {
+                string fileName = BackupFileName + QuarantineInfix + stamp;
+                File.Move(BackupFilePath, Path.Combine(DirectoryPath, fileName));
+                moved.Add(fileName);
+            }
+
+            return moved.ToArray();
+        }
+
+        /// <summary>
         /// 删除主档与备份档,用于编辑器清档。隔离文件是刻意留存的恢复材料,不在此列:
         /// 存档管理窗口把它单独列出并单独删除,因此清档不会隐式销毁迁移材料。
         /// </summary>
@@ -192,7 +242,9 @@ namespace Mochi.Save
         }
 
         /// <summary>
-        /// 把主档内容换成不可解析的片段,供损坏路径的故障注入使用。
+        /// 把主档内容换成<strong>确实解析不出</strong>的片段,供损坏路径的故障注入使用。
+        /// 不能用"看起来像坏 JSON"的截断对象(如 <c>{"corrupt":</c>):Newtonsoft 会把它解析成
+        /// 一个字段全默认的合法 SaveDocument,于是"损坏"变成"可读的空档",故障注入就注不出故障了。
         /// 主档不存在时不产生任何文件,避免注入动作凭空造出一个假档。
         /// </summary>
         public void InjectCorruption()
@@ -203,7 +255,7 @@ namespace Mochi.Save
                 return;
             }
 
-            File.WriteAllText(MainFilePath, "{\"corrupt\":", new UTF8Encoding(false));
+            File.WriteAllText(MainFilePath, "corrupted-by-injection", new UTF8Encoding(false));
         }
 
         private static void TryDeleteFile(string path)
