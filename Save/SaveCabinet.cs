@@ -101,7 +101,7 @@ namespace Mochi.Save
         /// </summary>
         /// <param name="document">读出的档;<see cref="SaveDocument.Sections"/> 允许为空。</param>
         /// <exception cref="ArgumentNullException">document 为 null。</exception>
-        /// <exception cref="JsonException">某节的 JSON 与注册类型不兼容;异常交由调用方按开发/正式构建分别处理。</exception>
+        /// <exception cref="Exception">注册节自身的 Restore 抛出异常时原样向调用方传播;调用方按恢复失败处理。</exception>
         public void RestoreAll(SaveDocument document)
         {
             if (document == null)
@@ -122,7 +122,20 @@ namespace Mochi.Save
                     continue;
                 }
 
-                object data = token == null ? null : token.ToObject(registration.DataType, serializer);
+                object data;
+                try
+                {
+                    data = token == null ? null : token.ToObject(registration.DataType, serializer);
+                }
+                catch (JsonException exception)
+                {
+                    log.WarnFormat(
+                        "存档节 {0} 的数据形状无法转换,跳过恢复:{1}",
+                        registration.SectionId,
+                        exception.Message);
+                    continue;
+                }
+
                 registration.Restore(data);
             }
 
